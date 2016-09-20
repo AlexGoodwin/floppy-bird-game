@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!---
+Referenced http://www.isaacsukin.com/news/2015/01/detailed-explanation-javascript-game-loops-and-timing
+Authors Alex Goodwin & Anurag Azad
+9/20/2016
+FLOPPY BIRD
+Intro to VR
+-->
 <!-- saved from url=(0084)https://moodle.cs.colorado.edu/pluginfile.php/23239/mod_page/content/2/Gameloop.html -->
 <html lang="en">
 <head>
@@ -34,7 +41,7 @@
 				lastFrameTimeMs = 0,
 				startTime = Date.now(),
 				hiScore = 0,
-				maxFPS = 120,
+				maxFPS = 60,
 				maxFrameSteps = 240,
 				framesThisSecond = 0,
 				lastFpsUpdate = 0,
@@ -123,7 +130,7 @@
 
 			function measureFPS(timestamp) {
 				if(timestamp > lastFpsUpdate + 1000) { // update every second
-					var decay = 0.25;
+					var decay = .25; // only move fps by 25% per second
 					fps = decay * framesThisSecond + (1 - decay) * fps;
 					lastFpsUpdate = timestamp;
 					framesThisSecond = 0;
@@ -152,7 +159,18 @@
 
 				//draw the ball
 				context.beginPath();
-				context.arc(ball.x, (ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage), ball.radius, 0, 2 * Math.PI, false);
+				// context.arc(ball.x, (ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage), ball.radius, 0, 2 * Math.PI, false);
+
+				context.ellipse(
+					ball.x,
+					ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage,
+					ball.radius,
+					Math.abs(ball.radius - ((ball.velocity_y + ball.gravitySpeed) / 2)),
+					0,
+					2 * Math.PI,
+					false
+				);
+
 				context.fillStyle = ball.fillColor;
 				context.fill();
 				context.lineWidth = 1;
@@ -213,8 +231,6 @@
 				var rand_y = Math.random() * canvas.height;
 				var gap = (ball.radius * tower.gapScale);
 
-				console.log(gap);
-
 				// top rectangle
 				var tower1 = {
 					x1: x,
@@ -253,10 +269,10 @@
 
 				if (towers.length < maxTowers) {
 					if (towers.length == 0) {
-						addTower(canvas.width - 15);
+						addTower(canvas.width);
 					} else {
 						if (towers[towers.length - 1].x1 < canvas.width - tower.horizontalGap) {
-							addTower(canvas.width - 15);
+							addTower(canvas.width);
 						}
 					}
 				}

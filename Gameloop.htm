@@ -8,328 +8,405 @@ Intro to VR
 -->
 <!-- saved from url=(0084)https://moodle.cs.colorado.edu/pluginfile.php/23239/mod_page/content/2/Gameloop.html -->
 <html lang="en">
-<head>
-	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
-	<title>Game Loop</title>
+        <title>Game Loop</title>
 
-	<script src="./Gameloop_files/jquery.min.js"></script>
-	<script src="jquery.hotkeys.js"></script>
-	<script src="key_status.js"></script>
+        <script src="./Gameloop_files/jquery.min.js"></script>
+        <script src="jquery.hotkeys.js"></script>
+        <script src="key_status.js"></script>
 
-	<style>
-	body {
-		overflow: hidden;
-	}
-	</style>
+        <style>
+            body {
+                overflow: hidden;
+            }
 
-	<script type="text/javascript">
-		var canvas, context;
+        </style>
+    </head>
 
-		$(window).bind("load", function() {
-			// Variables representing the canvas and the canvas' context (the context is used for actually drawing on the canvas)
-			canvas = document.getElementById("canvas");
-			context = canvas.getContext("2d");
+    <body style="margin: 0; padding: 0;">
+        <canvas id="canvas" height="640" width="640" style="border: 1px solid black; background-image: url(./bg.png); background-repeat: repeat-x; background-color: #5ddf72;">
+            Your browser does not support the canvas element.
+        </canvas>
 
-			fitCanvasToWindow();
+        <script type="text/javascript">
+            /**
+							Drawing context
+						**/
+            canvas = document.getElementById("canvas"),
+            context = canvas.getContext("2d");
 
-			// global game variables
-			var running = false,
-				started = false,
-				frameID,
-				delta = 0,
-				lastFrameTimeMs = 0,
-				startTime = Date.now(),
-				hiScore = 0,
-				maxFPS = 60,
-				maxFrameSteps = 240,
-				framesThisSecond = 0,
-				lastFpsUpdate = 0,
-				fps = maxFPS,
-				font = "20px Helvetica, Arial, sans-serif",
-				scoreColor = "red",
-				fpsColor = "blue",
-				timestep = 1000 / 60;
+            /**
+							Game Settings
+						**/
+            running = false,
+            started = false,
+            paused = false,
+            render_hud = true,
+            render_towers = true,
+            render_ball = true,
+            render_menu = false,
+            frameID = null,
+            startTime = Date.now(),
+            font = "20px Helvetica, Arial, sans-serif",
+            scoreColor = "red",
+            fpsColor = "red",
+            framesThisSecond = 0,
+            lastFpsUpdate = 0,
+            delta = 0,
+            lastFrameTimeMs = 0,
+            maxFrameSteps = 240,
+            maxFPS = 60,
+            fps = maxFPS,
+            timestep = 1000 / maxFPS;
 
-			// Object variables
-			var ball = {
-				x: 60,
-				y: canvas.height / 2,
-				radius: 15,
-				fillColor: "red",
-				strokeColor: "black",
-				velocity_x: 0,
-				velocity_y: 0,
-				speed: 20,
-				gravity: 0.25,
-				gravitySpeed: 0,
-				lastYPos: 0,
-			};
+            /**
+							Game Objects
+						**/
+            ball = {
+                x: 60,
+                y: canvas.height / 2,
+                radius: 15,
+                fillColor: "red",
+                strokeColor: "black",
+                velocity_x: 0,
+                velocity_y: 0,
+                speed: canvas.height / 30,
+                gravity: canvas.height / 1000,
+                gravitySpeed: 0,
+                lastYPos: 0
+            }
 
-			var tower = {
-				velocity_x: -4,
-				gapScale: 8,
-				width: 50,
-				horizontalGap: 300,
-				fillColor: 'saddlebrown'
-			};
+            tower = {
+                initial_velocity_x: -6,
+								velocity_x: -6,
+								initialGapScaler: canvas.height / 10,
+                verticalGapScaler: canvas.height / 10,
+                width: 200,
+                horizontalGap: 1000,
+                fillColor: 'saddlebrown',
+                minGapSize: 15
+            }
 
-			// the array of currently spawned towers
-			var towers = [];
+            menu = {
+                backgroundColor: "black"
+            }
 
-			start();
+            player = {
+                score: 0,
+                hiscore: 0,
+								tries: 0
+            }
 
-			function mainLoop(timestamp) {
-				// throttle frame rate
-				if(timestamp < lastFrameTimeMs + (1000 / maxFPS)) {
-					requestAnimationFrame(mainLoop);
-					return;
-				}
+            // the array of currently spawned towers
+            towers = [];
 
-				measureFPS(timestamp);
+            $(window).bind("load", function() {
+                fitCanvasToWindow();
+                start();
+            });
 
-				// track accumulated time that hasn't been simulated yet
-				delta += timestamp - lastFrameTimeMs; // time since last frame
-				lastFrameTimeMs = timestamp;
+            $(window).resize(function(e) {
+                fitCanvasToWindow();
+            });
 
-				processInput();
+            mainLoop = (timestamp) => {
+                // throttle frame rate
+                if (timestamp < lastFrameTimeMs + (1000 / maxFPS)) {
+                    requestAnimationFrame(mainLoop);
+                    return;
+                }
 
-				// simulate total elapsed time in fixed-size chunks
-				var numUpdateSteps = 0;
-				while (delta >= timestep) {
-					update(timestep);
-					delta -= timestep;
+                measureFPS(timestamp);
 
-					// sanity check (prevent spiral of death)
-					numUpdateSteps += 1;
-					if (numUpdateSteps >= maxFrameSteps) {
-						panic();
-						break;
-					}
-				}
+                // track accumulated time that hasn't been simulated yet
+                delta += timestamp - lastFrameTimeMs; // time since last frame
+                lastFrameTimeMs = timestamp;
 
-				draw(delta / timestep); // pass interpolation percentage
+                processInput();
 
-				frameID = requestAnimationFrame(mainLoop);
-			}
+                player.score += 1;
 
-			function update(delta) {
-				ball.lastYPos = ball.y;
-				ball.y += (ball.velocity_y);
+                // simulate total elapsed time in fixed-size chunks
+                var numUpdateSteps = 0;
+                while (delta >= timestep) {
+                    if (!paused) {
+                        update(timestep);
+                    }
+                    delta -= timestep;
 
-				// speed up towers as score increases
-				tower.velocity_x = (-4 - (currentScore() / 4000) );
+                    // sanity check (prevent spiral of death)
+                    numUpdateSteps += 1;
+                    if (numUpdateSteps >= maxFrameSteps) {
+                        panic();
+                        break;
+                    }
+                }
 
-				towerLogic();
-				collisionDetection();
-			}
+                draw(delta / timestep); // pass interpolation percentage
 
-			function panic() {
-				delta = 0;
-			}
+                frameID = requestAnimationFrame(mainLoop);
+            }
 
-			function measureFPS(timestamp) {
-				if(timestamp > lastFpsUpdate + 1000) { // update every second
-					var decay = .25; // only move fps by 25% per second
-					fps = decay * framesThisSecond + (1 - decay) * fps;
-					lastFpsUpdate = timestamp;
-					framesThisSecond = 0;
-				}
-				framesThisSecond += 1;
-			}
+            update = (delta) => {
+                ball.lastYPos = ball.y;
+                ball.y += (ball.velocity_y);
 
-			function processInput() {
-				if (keydown.up && ball.y > (0 + ball.radius)) {
-					ball.velocity_y = -ball.speed;
-					ball.gravitySpeed = 0;
-				} else if (keydown.down && ball.y < (canvas.height - ball.radius)) {
-					ball.gravitySpeed += ball.gravity;
-					ball.velocity_y = ball.speed + ball.gravitySpeed;
-				} else if (ball.y < (canvas.height - ball.radius)) {
-					ball.gravitySpeed += ball.gravity;
-					ball.velocity_y = ball.gravitySpeed;
-				} else {
-					ball.velocity_y = 0;
-				}
-			}
+                // speed up towers as score increases
+                tower.velocity_x = -5 - Math.log((1 / 2) * (player.score + 1) * (player.score + 1));
 
-			function draw(interpolationPercentage) {
-				//clear our drawing
-				context.clearRect(0, 0, canvas.width, canvas.height);
+                // make vertical gaps get smaller as score increased
+                tower.verticalGapScaler = tower.verticalGapScaler * .999;
 
-				//draw the ball
-				context.beginPath();
-				// context.arc(ball.x, (ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage), ball.radius, 0, 2 * Math.PI, false);
+                tower.verticalGapScaler = Math.max(tower.verticalGapScaler, tower.minGapSize);
 
-				context.ellipse(
-					ball.x,
-					ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage,
-					ball.radius,
-					Math.abs(ball.radius - ((ball.velocity_y + ball.gravitySpeed) / 2)),
-					0,
-					2 * Math.PI,
-					false
-				);
+                towerLogic();
+                collisionDetection();
+            }
 
-				context.fillStyle = ball.fillColor;
-				context.fill();
-				context.lineWidth = 1;
-				context.strokeStyle = ball.strokeColor;
-				context.stroke();
-				//context.closePath();
+            panic = () => {
+                delta = 0;
+            }
 
-				// draw towers
-				for (var i = 0; i < towers.length; i += 1) {
-					context.fillStyle = tower.fillColor;
-					// draw top rectangle
-					context.fillRect(
-						towers[i].x1,
-						0,
-						towers[i].x2 - towers[i].x1,
-						towers[i].y1
-					);
+            measureFPS = (timestamp) => {
+                if (timestamp > lastFpsUpdate + 1000) { // update every second
+                    var decay = .25; // only move fps by 25% per second
+                    fps = decay * framesThisSecond + (1 - decay) * fps;
+                    lastFpsUpdate = timestamp;
+                    framesThisSecond = 0;
+                }
+                framesThisSecond += 1;
+            }
 
-					// draw bottom rectangle
-					context.fillRect(
-						towers[i].x1,
-						towers[i].y2,
-						towers[i].x2 - towers[i].x1,
-						canvas.height - towers[i].y2
-					);
-				}
+            processInput = () => {
+                // up and down
+                if (keydown.up && ball.y > (0 + ball.radius)) {
+                    ball.velocity_y = -ball.speed;
+                    ball.gravitySpeed = 0;
+                } else if (keydown.down && ball.y < (canvas.height - ball.radius)) {
+                    ball.gravitySpeed += ball.gravity;
+                    ball.velocity_y = ball.speed + ball.gravitySpeed;
+                } else if (ball.y < (canvas.height - ball.radius)) {
+                    ball.gravitySpeed += ball.gravity;
+                    ball.velocity_y = ball.gravitySpeed;
+                } else {
+                    ball.velocity_y = 0;
+                }
 
-				context.font = font;
+                // pause menu
+                if (keydown.esc) {
+                    if (!render_menu) {
+                        openMenu();
+                    } else {
+                        closeMenu();
+                    }
+                }
+            }
 
-				// draw current score
-				context.fillStyle = scoreColor;
-				context.fillText("Your Score: " + currentScore(), canvas.width - 200, 20);
-				context.fillText("High Score: " + hiScore, canvas.width - 200, 50);
+            openMenu = () => {
+                paused = true;
+                render_menu = true;
+            }
 
-				// draw FPS
-				context.fillStyle = fpsColor;
-				context.fillText(Math.round(fps) + " FPS", canvas.width - 200, 80);
+            closeMenu = () => {
+                render_menu = false;
+                paused = false;
+            }
 
-				// draw tower.velocity_x
-				context.fillText("Tower Speed: " + tower.velocity_x, canvas.width - 200, 110);
-			}
+            draw = (interpolationPercentage) => {
+                // clear our drawing
+                context.clearRect(0, 0, canvas.width, canvas.height);
 
-			function stop() {
-				running = false;
-				started = false;
-				cancelAnimationFrame(frameID);
-			}
+                /**
+									Ball
+								**/
+                if (render_ball) {
+                    context.beginPath();
+                    context.ellipse(ball.x, ball.lastYPos + (ball.y - ball.lastYPos) * interpolationPercentage, ball.radius, Math.abs(ball.radius - ((ball.velocity_y + ball.gravitySpeed) / 2)), 0, 2 * Math.PI, false);
+                    context.fillStyle = ball.fillColor;
+                    context.fill();
+                    context.lineWidth = 1;
+                    context.strokeStyle = ball.strokeColor;
+                    context.stroke();
+                    context.closePath();
+                }
 
-			function start() {
-				if (!started) { // don't request multiple frames
-					started = true;
+                /**
+									Towers
+								**/
+                if (render_towers) {
+                    for (var i = 0; i < towers.length; i += 1) {
+                        context.fillStyle = tower.fillColor;
+                        // draw top rectangle
+                        context.fillRect(towers[i].x1, 0, towers[i].x2 - towers[i].x1, towers[i].y1);
 
-					frameID = requestAnimationFrame(mainLoop);
-				}
-			}
+                        // draw bottom rectangle
+                        context.fillRect(towers[i].x1, towers[i].y2, towers[i].x2 - towers[i].x1, canvas.height - towers[i].y2);
+                    }
+                }
 
-			function addTower(x) {
-				var rand_y = Math.random() * canvas.height;
-				var gap = (ball.radius * tower.gapScale);
+                /**
+									Console
+								**/
+                if (render_hud) {
+                    console_x = canvas.width - 300,
+                    console_y = 30,
+                    lineHeight = font.match(/[\d]+/) * 1.5;
 
-				// top rectangle
-				var tower1 = {
-					x1: x,
-					x2: x + tower.width,
-					y1: 0,
-					y2: rand_y - (gap / 2),
-				}
+                    context.font = font;
 
-				// bottom rectangle
-				var tower2 = {
-					x1: x,
-					x2: x + tower.width,
-					y1: rand_y + (gap / 2),
-					y2: canvas.height,
-				}
+                    // draw background
+                    context.fillStyle = "rgba(0,0,0,.8)";
+                    context.fillRect(console_x - 10, 20, 300, console_y + (lineHeight * 5))
 
-				towers.push({
-					x1: tower1.x1,
-					x2: tower1.x2,
-					y1: tower1.y2,
-					y2: tower2.y1,
-					velocity_x: tower.velocity_x
-				});
-			}
+                    // draw current score
+                    context.fillStyle = scoreColor;
+                    context.fillText("Your Score: " + player.score, console_x, console_y + (lineHeight * 1));
+                    context.fillText("High Score: " + player.hiscore, console_x, console_y + (lineHeight * 2));
 
-			function removeLeftTower() {
-				towers.shift();
-			}
+                    // draw FPS
+                    context.fillStyle = fpsColor;
+                    context.fillText(Math.round(fps) + " FPS", console_x, console_y + (lineHeight * 3));
 
-			function removeAllTowers() {
-					towers = [];
-			}
+                    // draw Tower Speed
+                    context.fillText("Tower Speed: " + (tower.velocity_x).toFixed(2), console_x, console_y + (lineHeight * 4));
 
-			function towerLogic() {
-				var maxTowers = canvas.width / (tower.width + tower.horizontalGap);
+                    // draw Tower Vertical Gap Size
+                    context.fillText("Tower.verticalGapScaler: " + (tower.verticalGapScaler).toFixed(2), console_x, console_y + (lineHeight * 5));
+                }
 
-				if (towers.length < maxTowers) {
-					if (towers.length == 0) {
-						addTower(canvas.width);
-					} else {
-						if (towers[towers.length - 1].x1 < canvas.width - tower.horizontalGap) {
-							addTower(canvas.width);
-						}
-					}
-				}
+                /**
+									Menu
+								**/
+                if (render_menu) {
+                    let width = canvas.width / 4,
+                        height = 400;
 
-				for (var i = 0; i < towers.length; i += 1) {
-					towers[i].x1 += tower.velocity_x;
-					towers[i].x2 += tower.velocity_x;
+                    context.fillRect((canvas.width / 2) - (width / 2), (canvas.height / 2) - (height / 2), width, height);
+                }
+            }
 
-					if (towers[i].x2 <= 0) {
-						removeLeftTower();
-					}
-				}
-			}
+            stop = () => {
+                running = false;
+                started = false;
+                cancelAnimationFrame(frameID);
 
-			function collisionDetection() {
-				var ballTop = ball.y - ball.radius,
-					ballBottom = ball.y + ball.radius,
-					ballLeft = ball.x - ball.radius,
-					ballRight = ball.x + ball.radius;
+                removeAllTowers();
 
-				if (ballRight >= towers[0].x1 && ballRight <= towers[0].x2) {
-					if (ballTop <= towers[0].y1 || ballBottom >= towers[0].y2) {
-						collision();
-					}
-				}
-			}
+                player.hiscore = Math.max(player.score, player.hiscore);
+								player.score = 0;
+								player.tries += 1;
 
-			function currentScore() {
-				return Date.now() - startTime;
-			}
+								// reset towers
+								tower.verticalGapScaler = tower.initialGapScaler;
+								tower.velocity_x = tower.initial_velocity_x;
+            }
 
-			function collision() {
-				removeAllTowers();
+            start = () => {
+                if (!started) { // don't request multiple frames
+                    started = true;
 
-				hiScore = Math.max(currentScore(), hiScore);
+                    frameID = requestAnimationFrame(mainLoop);
+                }
+            }
 
-				startTime = Date.now();
-				stop();
-			}
-		});
+            addTower = (x) => {
+                var rand_y = Math.random() * canvas.height;
+                var gap = (ball.radius * tower.verticalGapScaler);
 
-		$(window).resize(function(e) {
-			fitCanvasToWindow();
-		});
+                // top rectangle
+                var tower1 = {
+                    x1: x,
+                    x2: x + tower.width,
+                    y1: 0,
+                    y2: rand_y - (gap / 2)
+                }
 
-		function fitCanvasToWindow() {
-			canvas.width = window.innerWidth;
-			canvas.height = window.innerHeight;
-		}
-	</script>
+                // bottom rectangle
+                var tower2 = {
+                    x1: x,
+                    x2: x + tower.width,
+                    y1: rand_y + (gap / 2),
+                    y2: canvas.height
+                }
 
-</head>
+                towers.push({x1: tower1.x1, x2: tower1.x2, y1: tower1.y2, y2: tower2.y1, velocity_x: tower.velocity_x});
+            }
 
-<body style="margin: 0; padding: 0;">
-	<canvas id="canvas" height="640" width="640" style="border: 1px solid black; background-image: url(./bg.png); background-repeat: repeat-x; background-color: #5ddf72;">
-		Your browser does not support the canvas element.
-	</canvas>
-</body>
+            removeLeftTower = () => {
+                towers.shift();
+            }
+
+            removeAllTowers = () => {
+                towers = [];
+            }
+
+            towerLogic = () => {
+                var maxTowers = canvas.width / (tower.width + tower.horizontalGap);
+
+                if (towers.length < maxTowers) {
+                    if (towers.length == 0) {
+                        addTower(canvas.width);
+                    } else {
+                        if (towers[towers.length - 1].x1 < canvas.width - tower.horizontalGap) {
+                            addTower(canvas.width);
+                        }
+                    }
+                }
+
+                for (var i = 0; i < towers.length; i += 1) {
+                    towers[i].x1 += tower.velocity_x;
+                    towers[i].x2 += tower.velocity_x;
+
+                    if (towers[i].x2 <= 0) {
+                        removeLeftTower();
+                    }
+                }
+            }
+
+            collisionDetection = () => {
+								if(towers.length > 0) {
+									let ballTop = ball.y - ball.radius,
+											ballBottom = ball.y + ball.radius,
+											ballLeft = ball.x - ball.radius,
+											ballRight = ball.x + ball.radius;
+
+									if (ballRight >= towers[0].x1 && ballRight <= towers[0].x2) {
+											if (ballTop <= towers[0].y1 || ballBottom >= towers[0].y2) {
+													collision();
+											}
+									}
+								}
+            }
+
+	          collision = () => {
+                stop();
+            }
+
+            fitCanvasToWindow = () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            debounce = (func, wait, immediate) => {
+                var timeout;
+                return function() {
+                    var context = this,
+                        args = arguments;
+                    var later = function() {
+                        timeout = null;
+                        if (!immediate)
+                            func.apply(context, args);
+                        };
+                    var callNow = immediate && !timeout;
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                    if (callNow)
+                        func.apply(context, args);
+                    };
+            };
+        </script>
+    </body>
 
 </html>
